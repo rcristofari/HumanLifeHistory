@@ -27,7 +27,7 @@ for(p in 1:nPop){
   aad <- c(aad, rweibull(nspop, scale=a, shape=b))
 }
 censor <- sample(c(0,1), nSamp, replace=T, prob=c(percentcensor, (1-percentcensor)))
-for(a in 1:n){
+for(a in 1:nSamp){
   if(censor[a]==0){
     aad[a]<-runif(1,0,aad[a])}}
 
