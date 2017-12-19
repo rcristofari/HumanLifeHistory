@@ -204,7 +204,7 @@ g <- function(b, i, aad, censor, theta) {
 
 # Newton-Raphson iteration to find the root of G, starting from a guess "B0":
 # This converges very nicely provided the starting estimates are not too bad.
-NR <- function(b, i, add, censor, theta, thres = NR_thres, verbose=F){
+NR <- function(b, i, aad, censor, theta, thres = NR_thres, verbose=F){
   B0 <- b
   B1 <- B0 - (G(B0, i, aad, censor, theta)/g(B0, i, aad, censor, theta))
   while(abs(B0-B1) >= thres) {
@@ -219,7 +219,7 @@ NR <- function(b, i, add, censor, theta, thres = NR_thres, verbose=F){
 ##############################################################################################################
 # Get an estimate of Ai given an updated estimate of Bi
 
-Ai <- function(b, i, add, censor, theta){
+Ai <- function(b, i, aad, censor, theta){
   
   A1 <- function(b, i, aad, censor, theta) {
     total <- 0
@@ -326,7 +326,7 @@ Init_g <- function(b, i, aad, censor, RB) {
 
 # Newton-Raphson iteration to find the root of G, starting from a guess "B0":
 # This converges very nicely provided the starting estimates are not too bad.
-Init_NR <- function(b, i, add, censor, RB, thres = NR_thres, verbose=F){
+Init_NR <- function(b, i, aad, censor, RB, thres = NR_thres, verbose=F){
   B0 <- b
   B1 <- B0 - (Init_G(B0, i, aad, censor, RB)/Init_g(B0, i, aad, censor, RB))
   while(abs(B0-B1) >= thres) {
@@ -341,7 +341,7 @@ Init_NR <- function(b, i, add, censor, RB, thres = NR_thres, verbose=F){
 ##############################################################################################################
 # Get an estimate of Ai given an updated estimate of Bi
 
-Init_Ai <- function(b, i, add, censor, RB){
+Init_Ai <- function(b, i, aad, censor, RB){
   
   A1 <- function(b, i, aad, censor, RB) {
     total <- 0
@@ -419,9 +419,9 @@ Init_Theta <- vector(length=3*n)
 for(i in 1:n){
   b <- b_quantile_estimate(i, belonging=initial_belonging, aad=aad, censor=censor, level=.1)
   # Get a first estimate of Bi:
-  Init_Theta[(i-1)*3+3] <- Init_NR(b, i, add=aad, censor=censor, RB=initial_belonging, thres = thres)
+  Init_Theta[(i-1)*3+3] <- Init_NR(b, i, aad=aad, censor=censor, RB=initial_belonging, thres = thres)
   # Get the corresponding Ai:
-  Init_Theta[(i-1)*3+2] <- Init_Ai(b, i, add=aad, censor=censor, RB=initial_belonging)
+  Init_Theta[(i-1)*3+2] <- Init_Ai(b, i, aad=aad, censor=censor, RB=initial_belonging)
   # Get the corresponding weight:
   Init_Theta[(i-1)*3+1] <- Init_Wi(i, aad=aad, censor=censor, RB=initial_belonging)
 }
@@ -453,9 +453,9 @@ while(converged == FALSE){
   for(i in 1:n){
     b <- b_quantile_estimate(i, belonging=current_belonging, aad=aad, censor=censor, level=.1)
     # Get a first estimate of Bi:
-    this_theta[(i-1)*3+3] <- NR(b, i, add, censor, theta=previous_theta, thres = thres)
+    this_theta[(i-1)*3+3] <- NR(b, i, aad, censor, theta=previous_theta, thres = thres)
     # Get the corresponding Ai:
-    this_theta[(i-1)*3+2] <- Ai(b, i, add, censor, theta=previous_theta)
+    this_theta[(i-1)*3+2] <- Ai(b, i, aad, censor, theta=previous_theta)
     # Get the corresponding weight:
     this_theta[(i-1)*3+1] <- Wi(i, aad, censor, theta=previous_theta) 
   }
@@ -475,7 +475,7 @@ while(converged == FALSE){
     formula <- substr(formula,1,nchar(formula)-3)
     funform <- function(x) eval(parse(text=formula))
     plot(lx$age, lx$surv, cex=.05)
-    curve(funform, from=min(aad), to=max(aad), add=T, col='red')}
+    curve(funform, from=min(aad), to=max(aad), aad=T, col='red')}
 
   k <- k+1}
 
@@ -507,7 +507,6 @@ print(paste('Convergence reached in', round((proc.time()[3] - start_time[3])/60)
 return(output)
 }
 
-
 ####################################################################################
 # PLOT A MIXTURE WEIBULL SURVIVAL CURVE
 ####################################################################################
@@ -526,7 +525,7 @@ PlotWeibull <- function(aad, censor, theta, add=FALSE) {
   curve(funform, from=min(aad), to=max(aad), add=add, col='red')}
 
 ####################################################################################
-# PARAMETRIC BOOTSTRAP ROUTINE
+# BOOTSTRAP ROUTINE
 ####################################################################################
 
 CIWeibull <- function(method='nonparametric', theta=NA, n=2, aad=NA, censor=NA, nBs = 100, verbose=T, thres=1e-4, NR_thres=1e-6){
