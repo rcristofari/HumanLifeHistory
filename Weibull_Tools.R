@@ -5,6 +5,11 @@
 # FitWeibull(...)
 # PlotWeibull(...)
 # CIWeibull(...)
+
+# TODO list : multithread bootstrapping
+# Generalise method for left-censoring
+# Graphical guess for multimodal data
+
 # ChooseNWeibull(...)
 
 ##############################################################################################################
@@ -12,7 +17,7 @@
 ##############################################################################################################
 # Simulate an N-population mixed-weibull dataset:
 
-SimWeibull <- function(nSamp=1000, percentcensor=.2, theta){
+SimWeibull <- function(nSamp=1000, rightcensor=.2, leftcensor=0, theta){
   
 # Fix the missing degree of freedom on theta through the last weight in case of error:
 weights <- theta[seq(1,length(theta),3)]
@@ -26,346 +31,248 @@ for(p in 1:nPop){
   nspop <- round(nSamp*w)
   aad <- c(aad, rweibull(nspop, scale=a, shape=b))
 }
-censor <- sample(c(0,1), nSamp, replace=T, prob=c(percentcensor, (1-percentcensor)))
+censor <- sample(c(0,1,2), nSamp, replace=T, prob=c(rightcensor, (1-(rightcensor+leftcensor)), leftcensor))
 for(a in 1:nSamp){
   if(censor[a]==0){
-    aad[a]<-runif(1,0,aad[a])}}
+    aad[a]<-runif(1,(aad[a]/2),aad[a])
+  } else if (censor[a]==2){
+    aad[a]<-runif(1,aad[a],max(aad))}
+  }
 
 return(data.frame(aad, censor))}
 
 ####################################################################################
 ####################################################################################
 
-sim <- SimWeibull(nSamp=5000, percentcensor = .1, theta = c(.6, 170, 4, .4, 57, 9))
+sim <- SimWeibull(nSamp=5000, rightcensor = .1, leftcensor=.1, theta = c(.6, 70, 4, .4, 57, 9))
 aad <- as.numeric(sim[,1])
 censor <- as.numeric(sim[,2])
 
+load('~/Desktop/aad.RData')
+load('~/Desktop/censor.RData')
+simdata <- SimWeibull(nSamp=5000, leftcensor=.25, rightcensor=0, theta = c(.6, 70, 4, .4, 57, 9))
+aad <- as.numeric(simdata[,1])
+censor <- as.numeric(simdata[,2])
+                      
 ####################################################################################
 # MAIN EXPECTATION-MAXIMISATION FITTING FUNCTION
 ####################################################################################
 
-FitWeibull <- function(aad, censor, n=2, weights=NA, thres=1e-4, NR_thres=1e-6, verbose=F, graphical=FALSE){
-  # Structure of the theta vector: {w1, a1, b1, w2, a2, b2... wi, ai, bi} 
-  require(LearnBayes)
+FitWeibull <- function(aad, censor, n=2, weights=NA, thres=1e-4, NR_thres=1e-6, verbose=F, plot=FALSE){
+  # Structure of the theta vector: {w1, a1, b1, w2, a2, b2... wi, ai, bi}
+  # censor: 0 for right-censored, 1 for central (uncensored) and 2 for left-censored
   start_time <- proc.time()
   
   censor <- censor[order(aad)]
   aad <- sort(aad)
   
-  
   # the simple, 2-parameter Weibull PDF function:
-  f1 <- function(x,a,b){return((b/a)*((x/a)^(b-1)) * exp(-(x/a)^b))}
-  # the 2-sub-population, 5-parameter mixed PDF:
-  f <- function(x, theta){theta[1]*f1(x, a=theta[2], b=theta[3]) + (1-theta[1])*f1(x, a=theta[4], b=theta[5])}
+  pdf <- function(x,a,b){return((b/a)*((x/a)^(b-1)) * exp(-(x/a)^b))}
   # the simple, 2-parameter Weibull CDF function:
   cdf <- function(x,a,b){return(1 - exp(-(x/a)^b))}
   # the simple, 2-parameter Weibull tail function:
   tf <- function(x,a,b){return(exp(-(x/a)^b))}
-  # the 2-sub-population, 5-parameter mixed tail function:
-  R <- function(x, theta){return(1 - (theta[1]*cdf(x, a=theta[2], b=theta[3]) + (1-theta[1])*cdf(x, a=theta[4], b=theta[5])))}
-  
+
 ####################################################################################
 # N-population Weibull log-likelihood function
 LnL <- function(aad, censor, theta){
 	# theta is a vector of model parameters {w1, a1, b1, w2, a2, b2... wi, ai, bi}
 	# a are scales, b are shapes (opposite from other R functions but reflects the literature)
-  nPop <- length(theta)/3
   
   LogPrTj <- function(t, c, theta){
   # Summed probability of failure time Tj over all components 'i'
   # the simple, 2-parameter Weibull PDF function for a single component:
   total <- 0
   if(c == 1) {
-    for(k in 1:nPop){
+    for(k in 1:n){
       wi <- theta[((k-1)*3+1)]
       ai <- theta[((k-1)*3+2)]
       bi <- theta[((k-1)*3+3)]
-      total <- total + wi*f1(x=t, a=ai, b=bi)}
-    return(log(total))
+      total <- total + log(wi*pdf(x=t, a=ai, b=bi))}
+    return(total)
+  } else if (c == 0){
+    for(k in 1:n){
+      wi <- theta[((k-1)*3+1)]
+      ai <- theta[((k-1)*3+2)]
+      bi <- theta[((k-1)*3+3)]
+      total <- total + log(wi*tf(x=t, a=ai, b=bi))}
+  } else if (c == 2){
+    for(k in 1:n){
+      wi <- theta[((k-1)*3+1)]
+      ai <- theta[((k-1)*3+2)]
+      bi <- theta[((k-1)*3+3)]
+      total <- total + log(wi*cdf(x=t, a=ai, b=bi))}
   } else {
-    for(k in 1:nPop){
-      wi <- theta[((k-1)*3+1)]
-      ai <- theta[((k-1)*3+2)]
-      bi <- theta[((k-1)*3+3)]
-      total <- total + wi*tf(x=t, a=ai, b=bi)}
-    return(log(total))}
-  }
+      stop("Invalid value in the censoring vector.")}
+  return(total)}
 
   SumLogPrTj <- 0
   for(j in 1:length(aad)){
     SumLogPrTj <- SumLogPrTj + LogPrTj(aad[j], censor[j], theta)}
   
-  n <- length(censor)
-  r <- sum(censor)
+  # N <- length(censor)
+  # R <- sum(censor)
   # Full likelihood function:
-  L <- (lfactorial(n) - lfactorial(n-r)) + SumLogPrTj
+  # L <- (lfactorial(N) - lfactorial(N-R)) + SumLogPrTj
+  # return(L)
   
-  return(L)}
+  return(SumLogPrTj)}
 
 ##############################################################################################################
 # For each time "tj", determine the probability of belonging to subp. "i" given a parameter estimate theta:
 PRiTj <- function(t, c, i, theta){
+  
   w <- theta[((i-1)*3+1)] ; a <- theta[((i-1)*3+2)] ; b <- theta[((i-1)*3+3)]
-  if(c == 1) {
+  
+  if (c == 1) {
     total <- 0
-    for(k in 1:(length(theta)/3)){
+    for(k in 1:n){
       wi <- theta[((k-1)*3+1)]
       ai <- theta[((k-1)*3+2)]
       bi <- theta[((k-1)*3+3)]
-      total <- total + wi*f1(x=t, a=ai, b=bi)}
-    return(w * (f1(x=t, a=a, b=b)/total))
-  } else {
+      total <- total + wi*pdf(x=t, a=ai, b=bi)}
+    return(w * pdf(x=t, a=a, b=b) / total)
+    
+  } else if (c == 0) {
     total <- 0
-    for(k in 1:(length(theta)/3)){
+    for(k in 1:n){
       wi <- theta[((k-1)*3+1)]
       ai <- theta[((k-1)*3+2)]
       bi <- theta[((k-1)*3+3)]
       total <- total + wi*tf(x=t, a=ai, b=bi)}
-    return(w * (tf(x=t, a=a, b=b)/total))   
-  }}
+      return(w * tf(x=t, a=a, b=b) / total )  
+
+  } else if (c == 2) {
+    total <- 0
+    for(k in 1:n){
+      wi <- theta[((k-1)*3+1)]
+      ai <- theta[((k-1)*3+2)]
+      bi <- theta[((k-1)*3+3)]
+      total <- total + wi*cdf(x=t, a=ai, b=bi)}
+      return(w * cdf(x=t, a=a, b=b) / total )
+    
+  } else {
+    stop("Invalid value in the censoring vector.")}
+}
 
 ##############################################################################################################
 ## FUNCTIONS TO USE DURING THE ITERATION PHASES
 
-# Describe Bi given PRiTj:
-G <- function(b, i, aad, censor, theta) {
+# Describe Bi given the random belongings probs:
+G <- function(b, i, aad, censor, probs) {
   
-  G1 <- function(b, i, aad, censor, theta) {
+  G1 <- function(b, i, aad, censor, probs) {
     total <- 0
     for(j in 1:length(aad)){
-      total <- total + (PRiTj(aad[j], censor[j], i, theta) * log(aad[j]) * aad[j]^b)}
+      total <- total + (probs[j,i] * log(aad[j]) * aad[j]^b)}
     return(total)}
   
-  G2 <- function(i, aad, censor, theta) {
+  G2 <- function(i, aad, censor, probs) {
     total <- 0
     for(j in 1:length(aad)){
-      total <- total + PRiTj(aad[j], censor[j], i, theta)}
+      total <- total + probs[j,i]}
     return(total)}
-
-  G3 <- function(b, i, aad, censor, theta) {
+  
+  G3 <- function(b, i, aad, censor, probs) {
     total <- 0
     for(j in 1:length(aad)){
-      total <- total + (PRiTj(aad[j], censor[j], i, theta) * aad[j]^b)}
+      total <- total + (probs[j,i] * aad[j]^b)}
     return(total)}  
-
-  G4 <- function(i, aad, censor, theta) {
+  
+  G4 <- function(i, aad, censor, probs) {
     total <- 0
     for(j in 1:length(aad)){
-      total <- total + PRiTj(aad[j], censor[j], i, theta) * log(aad[j])}
+      total <- total + probs[j,i] * log(aad[j])}
     return(total)}  
-
-  G5 <- function(b, i, aad, censor, theta) {
+  
+  G5 <- function(b, i, aad, censor, probs) {
     total <- 0
     for(j in 1:length(aad)){
-      total <- total + PRiTj(aad[j], censor[j], i, theta)}
+      total <- total + probs[j,i]}
     return((1/b) * total)}
-
-  G <- (-1 * G1(b, i, aad, censor, theta) * G2(i, aad, censor, theta)) / G3(b, i, aad, censor, theta) + G4(i, aad, censor, theta) + G5(b, i, aad, censor, theta)
-
+  
+  G <- (-1 * G1(b, i, aad, censor, probs) * G2(i, aad, censor, probs)) / G3(b, i, aad, censor, probs) + G4(i, aad, censor, probs) + G5(b, i, aad, censor, probs)
+  
   return(G)}
 
 # Derivative of G to be used in the Newton iteration:
-g <- function(b, i, aad, censor, theta) {
+g <- function(b, i, aad, censor, probs) {
   
-  g1 <- function(b, i, aad, censor, theta) {
+  g1 <- function(b, i, aad, censor, probs) {
     total <- 0
     for(j in 1:length(aad)){
-      total <- total + PRiTj(aad[j], censor[j], i, theta)}
+      total <- total + probs[j,i]}
     total <- (-1/(b^2)) * total
     return(total)}
   
-  g2 <- function(i, aad, censor, theta) {
+  g2 <- function(i, aad, censor, probs) {
     total <- 0
     for(j in 1:length(aad)){
-      total <- total + PRiTj(aad[j], censor[j], i, theta)}
+      total <- total + probs[j,i]}
     return(total)}
   
-  U <- v <-  function(b, i, aad, censor, theta) {
+  U <- v <-  function(b, i, aad, censor, probs) {
     total <- 0
     for(j in 1:length(aad)){
-      total <- total + PRiTj(aad[j], censor[j], i, theta) * log(aad[j]) * aad[j]^b }
+      total <- total + probs[j,i] * log(aad[j]) * aad[j]^b }
     return(total)}
   
-  u <- function(b, i, aad, censor, theta) {
+  u <- function(b, i, aad, censor, probs) {
     total <- 0
     for(j in 1:length(aad)){
-      total <- total + PRiTj(aad[j], censor[j], i, theta) * (log(aad[j]))^2 * aad[j]^b }
-    return(total)}
-
-  V <- function(b, i, aad, censor, theta) {
-    total <- 0
-    for(j in 1:length(aad)){
-      total <- total + PRiTj(aad[j], censor[j], i, theta) * aad[j]^b }
+      total <- total + probs[j,i] * (log(aad[j]))^2 * aad[j]^b }
     return(total)}
   
-  g <- g1(b, i, aad, censor, theta) - g2(i, aad, censor, theta) * ((u(b, i, aad, censor, theta) * V(b, i, aad, censor, theta) - U(b, i, aad, censor, theta) * v(b, i, aad, censor, theta)) / V(b, i, aad, censor, theta)^2)
+  V <- function(b, i, aad, censor, probs) {
+    total <- 0
+    for(j in 1:length(aad)){
+      total <- total + probs[j,i] * aad[j]^b }
+    return(total)}
+  
+  g <- g1(b, i, aad, censor, probs) - g2(i, aad, censor, probs) * ((u(b, i, aad, censor, probs) * V(b, i, aad, censor, probs) - U(b, i, aad, censor, probs) * v(b, i, aad, censor, probs)) / V(b, i, aad, censor, probs)^2)
   
   return(g)}
 
 # Newton-Raphson iteration to find the root of G, starting from a guess "B0":
 # This converges very nicely provided the starting estimates are not too bad.
-NR <- function(b, i, aad, censor, theta, thres = NR_thres, verbose=F){
+NR <- function(b, i, aad, censor, probs, nr_thres = NR_thres, verbose=F){
   B0 <- b
-  B1 <- B0 - (G(B0, i, aad, censor, theta)/g(B0, i, aad, censor, theta))
-  while(abs(B0-B1) >= thres) {
+  B1 <- B0 - (G(B0, i, aad, censor, probs)/g(B0, i, aad, censor, probs))
+  while(abs(B0-B1) >= nr_thres) {
     B0 <- B1
-    B1 <- B0 - (G(B0, i, aad, censor, theta)/g(B0, i, aad, censor, theta))
-    if(verbose==T){
-    print(B1)}
+    B1 <- B0 - (G(B0, i, aad, censor, probs)/g(B0, i, aad, censor, probs))
+    if(verbose==T) print(B1)
   }
-  return(B1)
-}
+  return(B1)}
 
 ##############################################################################################################
 # Get an estimate of Ai given an updated estimate of Bi
 
-Ai <- function(b, i, aad, censor, theta){
+Ai <- function(b, i, aad, censor, probs){
   
-  A1 <- function(b, i, aad, censor, theta) {
+  A1 <- function(b, i, aad, censor, probs) {
     total <- 0
     for(j in 1:length(aad)){
-      total <- total + (PRiTj(aad[j], censor[j], i, theta) * aad[j]^b)}
+      total <- total + (probs[j,i] * aad[j]^b)}
     return(total)}
   
-  A2 <- function(i, aad, censor, theta) {
+  A2 <- function(i, aad, censor, probs) {
     total <- 0
     for(j in 1:length(aad)){
-      total <- total + PRiTj(aad[j], censor[j], i, theta)}
+      total <- total + probs[j,i]}
     return(total)}
   
-  return((A1(b, i, aad, censor, theta) / A2(i, aad, censor, theta))^(1/b))
+  return((A1(b, i, aad, censor, probs) / A2(i, aad, censor, probs))^(1/b))
   
 }
 
 ##############################################################################################################
 # Get an estimate of Wi given a updated estimates of Ai and Bi sotred in theta
 
-Wi <- function(i, aad, censor, theta){
+Wi <- function(i, aad, censor, probs){
   total <- 0
   for(j in 1:length(aad)){
-    total <- total + PRiTj(aad[j], censor[j], i, theta)}
-  return(total/length(aad))}
-
-##############################################################################################################
-## FUNCTIONS TO USE DURING THE INITIAL PHASE (Random probabilities and no parameter estimates)
-
-# Describe Bi given the random belongings RB:
-Init_G <- function(b, i, aad, censor, RB) {
-  
-  G1 <- function(b, i, aad, censor, RB) {
-    total <- 0
-    for(j in 1:length(aad)){
-      total <- total + (RB[j,i] * log(aad[j]) * aad[j]^b)}
-    return(total)}
-  
-  G2 <- function(i, aad, censor, RB) {
-    total <- 0
-    for(j in 1:length(aad)){
-      total <- total + RB[j,i]}
-    return(total)}
-  
-  G3 <- function(b, i, aad, censor, RB) {
-    total <- 0
-    for(j in 1:length(aad)){
-      total <- total + (RB[j,i] * aad[j]^b)}
-    return(total)}  
-  
-  G4 <- function(i, aad, censor, RB) {
-    total <- 0
-    for(j in 1:length(aad)){
-      total <- total + RB[j,i] * log(aad[j])}
-    return(total)}  
-  
-  G5 <- function(b, i, aad, censor, RB) {
-    total <- 0
-    for(j in 1:length(aad)){
-      total <- total + RB[j,i]}
-    return((1/b) * total)}
-  
-  G <- (-1 * G1(b, i, aad, censor, RB) * G2(i, aad, censor, RB)) / G3(b, i, aad, censor, RB) + G4(i, aad, censor, RB) + G5(b, i, aad, censor, RB)
-  
-  return(G)}
-
-# Derivative of G to be used in the Newton iteration:
-Init_g <- function(b, i, aad, censor, RB) {
-  
-  g1 <- function(b, i, aad, censor, RB) {
-    total <- 0
-    for(j in 1:length(aad)){
-      total <- total + RB[j,i]}
-    total <- (-1/(b^2)) * total
-    return(total)}
-  
-  g2 <- function(i, aad, censor, RB) {
-    total <- 0
-    for(j in 1:length(aad)){
-      total <- total + RB[j,i]}
-    return(total)}
-  
-  U <- v <-  function(b, i, aad, censor, RB) {
-    total <- 0
-    for(j in 1:length(aad)){
-      total <- total + RB[j,i] * log(aad[j]) * aad[j]^b }
-    return(total)}
-  
-  u <- function(b, i, aad, censor, RB) {
-    total <- 0
-    for(j in 1:length(aad)){
-      total <- total + RB[j,i] * (log(aad[j]))^2 * aad[j]^b }
-    return(total)}
-  
-  V <- function(b, i, aad, censor, RB) {
-    total <- 0
-    for(j in 1:length(aad)){
-      total <- total + RB[j,i] * aad[j]^b }
-    return(total)}
-  
-  g <- g1(b, i, aad, censor, RB) - g2(i, aad, censor, RB) * ((u(b, i, aad, censor, RB) * V(b, i, aad, censor, RB) - U(b, i, aad, censor, RB) * v(b, i, aad, censor, RB)) / V(b, i, aad, censor, RB)^2)
-  
-  return(g)}
-
-# Newton-Raphson iteration to find the root of G, starting from a guess "B0":
-# This converges very nicely provided the starting estimates are not too bad.
-Init_NR <- function(b, i, aad, censor, RB, thres = NR_thres, verbose=F){
-  B0 <- b
-  B1 <- B0 - (Init_G(B0, i, aad, censor, RB)/Init_g(B0, i, aad, censor, RB))
-  while(abs(B0-B1) >= thres) {
-    B0 <- B1
-    B1 <- B0 - (Init_G(B0, i, aad, censor, RB)/Init_g(B0, i, aad, censor, RB))
-    if(verbose==T){
-    print(B1)}
-  }
-  return(B1)
-}
-
-##############################################################################################################
-# Get an estimate of Ai given an updated estimate of Bi
-
-Init_Ai <- function(b, i, aad, censor, RB){
-  
-  A1 <- function(b, i, aad, censor, RB) {
-    total <- 0
-    for(j in 1:length(aad)){
-      total <- total + (RB[j,i] * aad[j]^b)}
-    return(total)}
-  
-  A2 <- function(i, aad, censor, RB) {
-    total <- 0
-    for(j in 1:length(aad)){
-      total <- total + RB[j,i]}
-    return(total)}
-  
-  return((A1(b, i, aad, censor, RB) / A2(i, aad, censor, RB))^(1/b))
-  
-}
-
-##############################################################################################################
-# Get an estimate of Wi given a updated estimates of Ai and Bi sotred in theta
-
-Init_Wi <- function(i, aad, censor, RB){
-  total <- 0
-  for(j in 1:length(aad)){
-    total <- total + RB[j,i]}
+    total <- total + probs[j,i]}
   return(total/length(aad))}
 
 ####################################################################################
@@ -396,7 +303,7 @@ b_quantile_estimate <- function(i, belonging, aad=aad, censor=censor, level=.1){
 
 ##############################################################################################################
 # Initialise an Lx plot if desired
-if(graphical == TRUE){
+if(plot == TRUE){
   require(survival)
   sfit <- survfit(Surv(aad,censor,type="right")~1)
   lx <- data.frame('age'=summary(sfit)$time, 'lx'=(summary(sfit)[6]))
@@ -408,6 +315,7 @@ if(graphical == TRUE){
 ##############################################################################################################
 # Initialise the belonging probabilities randomly after a Dirichlet distribution
 if(is.na(weights)==T){
+require(LearnBayes)
 initial_belonging <- rdirichlet(length(aad), rep(.1, n))
 initial_belonging <- initial_belonging[order(initial_belonging[,1]),]
 } else { initial_belonging <- weights }
@@ -419,11 +327,11 @@ Init_Theta <- vector(length=3*n)
 for(i in 1:n){
   b <- b_quantile_estimate(i, belonging=initial_belonging, aad=aad, censor=censor, level=.1)
   # Get a first estimate of Bi:
-  Init_Theta[(i-1)*3+3] <- Init_NR(b, i, aad=aad, censor=censor, RB=initial_belonging, thres = thres)
+  Init_Theta[(i-1)*3+3] <- NR(b, i, aad=aad, censor=censor, probs=initial_belonging, nr_thres = NR_thres)
   # Get the corresponding Ai:
-  Init_Theta[(i-1)*3+2] <- Init_Ai(b, i, aad=aad, censor=censor, RB=initial_belonging)
+  Init_Theta[(i-1)*3+2] <- Ai(b, i, aad=aad, censor=censor, probs=initial_belonging)
   # Get the corresponding weight:
-  Init_Theta[(i-1)*3+1] <- Init_Wi(i, aad=aad, censor=censor, RB=initial_belonging)
+  Init_Theta[(i-1)*3+1] <- Wi(i, aad=aad, censor=censor, probs=initial_belonging)
 }
 
 # Add in the first LnL value
@@ -444,20 +352,23 @@ k <- 1
 while(converged == FALSE){
   this_theta <- vector(length=3*n)
   previous_theta <- thetas[k,]
-
+  
   current_belonging <- matrix(ncol=n, nrow=length(aad))
   for(j in 1:length(aad)){
     for(i in 1:n){
       current_belonging[j,i] <- PRiTj(aad[j], censor[j], i, previous_theta)}}
-
+  
   for(i in 1:n){
     b <- b_quantile_estimate(i, belonging=current_belonging, aad=aad, censor=censor, level=.1)
     # Get a first estimate of Bi:
-    this_theta[(i-1)*3+3] <- NR(b, i, aad, censor, theta=previous_theta, thres = thres)
+    #this_theta[(i-1)*3+3] <- NR(b, i, aad, censor, theta=previous_theta, thres = thres)
+    this_theta[(i-1)*3+3] <- NR(b, i, aad, censor, probs=current_belonging, nr_thres = NR_thres)
     # Get the corresponding Ai:
-    this_theta[(i-1)*3+2] <- Ai(b, i, aad, censor, theta=previous_theta)
+    #this_theta[(i-1)*3+2] <- Ai(b, i, aad, censor, theta=previous_theta)
+    this_theta[(i-1)*3+2] <- Ai(b, i, aad, censor, probs=current_belonging)
     # Get the corresponding weight:
-    this_theta[(i-1)*3+1] <- Wi(i, aad, censor, theta=previous_theta) 
+    #this_theta[(i-1)*3+1] <- Wi(i, aad, censor, theta=previous_theta)
+    this_theta[(i-1)*3+1] <- Wi(i, aad, censor, probs=current_belonging)
   }
 
   LogLikelihood <- append(LogLikelihood, LnL(aad=aad, censor=censor, theta=this_theta))
@@ -469,13 +380,13 @@ while(converged == FALSE){
     stable_steps <- stable_steps +1 } else { stable_steps <- 0 }
   if(stable_steps >= 3) converged <- TRUE
   
-  if(graphical == TRUE){
+  if(plot == TRUE){
     formula <- paste(rep('%s * exp(-(x/%s)^%s) + ', length(this_theta)/3), sep='', collapse='')
     formula <- do.call(sprintf, c(list(formula), round(this_theta, 3)))
     formula <- substr(formula,1,nchar(formula)-3)
     funform <- function(x) eval(parse(text=formula))
     plot(lx$age, lx$surv, cex=.05)
-    curve(funform, from=min(aad), to=max(aad), aad=T, col='red')}
+    curve(funform, from=min(aad), to=max(aad), add=T, col='red')}
 
   k <- k+1}
 
@@ -513,15 +424,17 @@ return(output)
 
 PlotWeibull <- function(aad, censor, theta, add=FALSE) {
   if(add==FALSE){
-  require(survival)
-  sfit <- survfit(Surv(aad,censor,type="right")~1)
-  lx <- data.frame('age'=summary(sfit)$time, 'lx'=(summary(sfit)[6]))
-  plot(lx$age, lx$surv, cex=.05)}
-  formula <- paste(rep('%s * exp(-(x/%s)^%s) + ', length(this_theta)/3), sep='', collapse='')
-  formula <- do.call(sprintf, c(list(formula), round(this_theta, 3)))
+    require(survival)
+    sfit <- survfit(Surv(aad,censor,type="right")~1)
+    lx <- data.frame('age'=summary(sfit)$time, 'lx'=(summary(sfit)[6]))
+    plot(lx$age, lx$surv, cex=.05)
+    add <- TRUE}
+  
+  formula <- paste(rep('%s * exp(-(x/%s)^%s) + ', length(theta)/3), sep='', collapse='')
+  formula <- do.call(sprintf, c(list(formula), round(theta, 3)))
   formula <- substr(formula,1,nchar(formula)-3)
   funform <- function(x) eval(parse(text=formula))
-  plot(lx$age, lx$surv, cex=.05)
+  #plot(lx$age, lx$surv, cex=.05)
   curve(funform, from=min(aad), to=max(aad), add=add, col='red')}
 
 ####################################################################################
@@ -556,7 +469,7 @@ CIWeibull <- function(method='nonparametric', theta=NA, n=2, aad=NA, censor=NA, 
     for(i in 1:nBs){
       fit <- NA
       while(is.na(fit)==T){
-      simdata <- SimWeibull(nSamp=length(aad), percentcensor=((length(censor)-sum(censor))/length(censor)), theta = theta)
+      simdata <- SimWeibull(nSamp=length(aad), rightcensor=((length(censor)-sum(censor))/length(censor)), theta = theta)
       fit <- FitWeibull(aad=as.numeric(simdata$aad), censor=as.numeric(simdata$censor), n=n, weights=NA, thres=thres, NR_thres=NR_thres)}
       fits[[i]] <- fit}
     
