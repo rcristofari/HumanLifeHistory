@@ -48,13 +48,13 @@ return(list(aad=aad, censor=censor, belonging=belonging))}
 ####################################################################################
 ####################################################################################
 
-sim <- SimWeibull(nSamp=5000, rightcensor = .4, leftcensor=0, theta = c(.6, 120, 4, .4, 37, 9))
+sim <- SimWeibull(nSamp=5000, rightcensor = .5, leftcensor=0, theta = c(.6, 90, 4, .4, 37, 9))
 aad <- as.numeric(sim[['aad']])
 censor <- as.numeric(sim[['censor']])
 
 load('~/Desktop/aad.RData')
 load('~/Desktop/censor.RData')
-simdata <- SimWeibull(nSamp=5000, leftcensor=0, rightcensor=0.7, theta = c(.5, 90, 4, .5, 27, 9))
+simdata <- SimWeibull(nSamp=5000, leftcensor=0, rightcensor=0.4, theta = c(.5, 90, 4, .5, 27, 9))
 aad <- as.numeric(simdata[['aad']])
 censor <- as.numeric(simdata[['censor']])
 belonging <- simdata[['belonging']]
@@ -68,6 +68,7 @@ FitWeibull <- function(aad, censor, n=2, weights=NA, thres=1e-4, NR_thres=1e-6, 
   # Structure of the theta vector: {w1, a1, b1, w2, a2, b2... wi, ai, bi}
   # censor: 0 for right-censored, 1 for uncensored
   start_time <- proc.time()
+  require(Rmpfr)
  
   if(is.na(weights)==T){ 
     censor <- censor[order(aad)]
@@ -147,22 +148,87 @@ PRiTj <- function(t, c, i, theta){
 
 # Describe Bi given the belongings probs:
 G <- function(b, i, aad, censor, probs) {
-  G1 <- function(b, i, aad, probs) sum(probs[,i] * log(aad) * aad^b)
+  # Using multiple-precision floating-point reliable numbers to get the G1/G3 ratio
+  # in case the log goes over 709 to avoid failing on an Inf exponential
+  
+  # G1 <- function(b, i, aad, probs) sum(probs[,i] * log(aad) * aad^b) # goes do Inf
+  
+  G1 <- function(b, i, aad, probs){
+    total <- 0
+    for(j in 1:length(aad)){
+      logpoint <- log(probs[j,i]) + log(log(aad[j])) + b*log(aad[j])
+      if(logpoint > 709){
+      total <- mpfr(total, precBits = 24)
+      logpoint <- mpfr(logpoint, precBits = 24)}
+      total <- total + exp(logpoint)}
+    return(total)}
+  
   G2 <- function(i, censor, probs) sum(probs[censor==1,i])
-  G3 <- function(b, i, aad, probs) sum(probs[,i] * aad^b)
+  
+  # G3 <- function(b, i, aad, probs) sum(probs[,i] * aad^b) # goes do Inf
+  
+  G3 <- function(b, i, aad, probs){
+    total <- 0
+    for(j in 1:length(aad)){
+      logpoint <- log(probs[j,i]) + b*log(aad[j])
+      if(logpoint > 709){
+        total <- mpfr(total, precBits = 24)
+        logpoint <- mpfr(logpoint, precBits = 24)}
+      total <- total + exp(logpoint)}
+    return(total)}
+  
+  G13 <- function(b, i, aad, probs) as.numeric(G1(b, i, aad, probs) / G3(b, i, aad, probs))
+  
   G4 <- function(i, aad, censor, probs) sum(probs[censor==1,i] * log(aad[censor==1]))
   G5 <- function(b, i, censor, probs) sum(probs[censor==1,i])/b
-  G <- (-1 * G1(b, i, aad, probs) * G2(i, censor, probs)) / G3(b, i, aad, probs) + G4(i, aad, censor, probs) + G5(b, i, censor, probs)
+  # G <- (-1 * G1(b, i, aad, probs) * G2(i, censor, probs)) / G3(b, i, aad, probs) + G4(i, aad, censor, probs) + G5(b, i, censor, probs)
+  G <- (-1 * G13(b, i, aad, probs) * G2(i, censor, probs)) + G4(i, aad, censor, probs) + G5(b, i, censor, probs)
 return(G)}
 
 # Derivative of G to be used in the Newton iteration:
 g <- function(b, i, aad, censor, probs) {
   g1 <- function(b, i, aad, censor, probs) (-1/(b^2)) * sum(probs[censor==1,i])
   g2 <- function(i, aad, censor, probs) sum(probs[censor==1,i])
-  U <- v <-  function(b, i, aad, probs) sum(probs[,i] * log(aad) * aad^b)
-  u <- function(b, i, aad, probs) sum(probs[,i] * log(aad)^2 * aad^b)
-  V <- function(b, i, aad, probs) sum(probs[,i] * aad^b)
-  g <- g1(b, i, aad, censor, probs) - g2(i, aad, censor, probs) * ((u(b, i, aad, probs) * V(b, i, aad, probs) - U(b, i, aad, probs) * v(b, i, aad, probs)) / V(b, i, aad, probs)^2)
+  
+  # U <- v <-  function(b, i, aad, probs) sum(probs[,i] * log(aad) * aad^b)
+  # u <- function(b, i, aad, probs) sum(probs[,i] * log(aad)^2 * aad^b)
+  # V <- function(b, i, aad, probs) sum(probs[,i] * aad^b)
+
+  U <- v <-  function(b, i, aad, probs){
+    total <- 0
+    for(j in 1:length(aad)){
+      logpoint <- log(probs[j,i]) + log(log(aad[j])) + b*log(aad[j])
+      if(logpoint > 709){
+        total <- mpfr(total, precBits = 24)
+        logpoint <- mpfr(logpoint, precBits = 24)}
+      total <- total + exp(logpoint)}
+    return(total)}
+  
+  u <-  function(b, i, aad, probs){
+    total <- 0
+    for(j in 1:length(aad)){
+      logpoint <- log(probs[j,i]) + 2*log(log(aad[j])) + b*log(aad[j])
+      if(logpoint > 709){
+        total <- mpfr(total, precBits = 24)
+        logpoint <- mpfr(logpoint, precBits = 24)}
+      total <- total + exp(logpoint)}
+    return(total)}  
+  
+  V <-  function(b, i, aad, probs){
+    total <- 0
+    for(j in 1:length(aad)){
+      logpoint <- log(probs[j,i]) + b*log(aad[j])
+      if(logpoint > 709){
+        total <- mpfr(total, precBits = 24)
+        logpoint <- mpfr(logpoint, precBits = 24)}
+      total <- total + exp(logpoint)}
+    return(total)} 
+  
+  uVUvV2 <- function(b, i, aad, probs) as.numeric((u(b, i, aad, probs)*V(b, i, aad, probs) - U(b, i, aad, probs)*v(b, i, aad, probs)) / V(b, i, aad, probs)^2)
+  
+  g <- g1(b, i, aad, censor, probs) - g2(i, aad, censor, probs) * uVUvV2(b, i, aad, probs)
+  
+  # g <- g1(b, i, aad, censor, probs) - g2(i, aad, censor, probs) * ((u(b, i, aad, probs) * V(b, i, aad, probs) - U(b, i, aad, probs) * v(b, i, aad, probs)) / V(b, i, aad, probs)^2)
 return(g)}
 
 # Newton-Raphson iteration to find the root of G, starting from a guess "B0":
@@ -356,11 +422,12 @@ PlotWeibull <- function(aad, censor, theta, add=FALSE) {
 # BOOTSTRAP ROUTINE
 ####################################################################################
 
-CIWeibull <- function(method='nonparametric', theta=NA, n=2, aad=NA, censor=NA, nBs = 100, verbose=T, thres=1e-4, NR_thres=1e-6){
-  # Type is (1) "parametric" or (2) "nonparametric"
+CIWeibull <- function(method='nonparametric', theta=NA, n=2, aad=NA, censor=NA, nBs = 100, threads=1, verbose=F, plot=F, thres=1e-4, NR_thres=1e-6){
+  # Type is (1) "parametric" ('p') or (2) "nonparametric" ('np')
   # For non-parametric bootstrapping, theta is not needed.
   # For parametric bootstrapping, n is not needed
   # For parametric bootstrapping, aad and censor are used to extract dataset shape
+  ptm_total <- proc.time()
   
   # Some controls on passed arguments
   # XXXXX
@@ -368,28 +435,68 @@ CIWeibull <- function(method='nonparametric', theta=NA, n=2, aad=NA, censor=NA, 
   if(is.na(theta)==FALSE){
   n <- length(theta)/3}
   
+  # Single-threaded case does not require parallel libraries for better portability
+  if (threads == 1) {
+
   fits <- list()
-  
-  if(method=='nonparametric'){
+  if(method=='nonparametric' | method=='np'){
     for(i in 1:nBs){
+      print(paste("Non-parametric bootstrap replicate number", i))
       fit <- NA
       while(is.na(fit)==T){
       index <- sort(sample(1:length(aad), length(aad), replace=T))
       this_aad <- aad[index]
       this_censor <- censor[index]
-      fit <- FitWeibull(this_aad, this_censor, n=n, weights=NA, thres=thres, NR_thres=NR_thres)}
+      fit <- FitWeibull(this_aad, this_censor, n=n, weights=NA, thres=thres, NR_thres=NR_thres, verbose=verbose, plot=plot)}
       fits[[i]] <- fit}
     
-  } else if(method=='parametric'){
+  } else if(method=='parametric' | method=='p'){
     for(i in 1:nBs){
+      print(paste("Parametric bootstrap replicate number", i))
       fit <- NA
       while(is.na(fit)==T){
       simdata <- SimWeibull(nSamp=length(aad), rightcensor=((length(censor)-sum(censor))/length(censor)), theta = theta)
-      fit <- FitWeibull(aad=as.numeric(simdata$aad), censor=as.numeric(simdata$censor), n=n, weights=NA, thres=thres, NR_thres=NR_thres)}
+      fit <- FitWeibull(aad=as.numeric(simdata$aad), censor=as.numeric(simdata$censor), n=n, weights=NA, thres=thres, NR_thres=NR_thres, verbose=verbose, plot=plot)}
       fits[[i]] <- fit}
     
-  } else { print(paste(type, ': invalid bootstrapping type (parametric or nonparametric)'))}
+  } else { print(paste(type, ': invalid bootstrapping type (only parametric, p or nonparametric, np)'))}
 
+    
+  # Multithreaded case uses de doParallel library:
+  } else if (threads > 1) {
+  
+  #Setup the parallel cluster
+  library("foreach")
+  library("doParallel")
+  cl <- makeCluster(3)
+  registerDoParallel(cl)
+
+  if(method=='nonparametric' | method=='np'){
+  fits = foreach(b = 1:nBs, 
+                    .export=c('FitWeibull')
+  ) %dopar% {
+        fit <- NA
+        while(is.na(fit)==T){
+          index <- sort(sample(1:length(aad), length(aad), replace=T))
+          this_aad <- aad[index]
+          this_censor <- censor[index]
+          fit <- FitWeibull(this_aad, this_censor, n=n, weights=NA, thres=thres, NR_thres=NR_thres, verbose=verbose, plot=plot)}
+          return(fit)}
+      
+    } else if(method=='parametric' | method=='p'){
+    fits = foreach(b = 1:nBs, 
+                     .export=c('FitWeibull')
+    ) %dopar% {
+        fit <- NA
+        while(is.na(fit)==T){
+          simdata <- SimWeibull(nSamp=length(aad), rightcensor=((length(censor)-sum(censor))/length(censor)), theta = theta)
+          fit <- FitWeibull(aad=as.numeric(simdata$aad), censor=as.numeric(simdata$censor), n=n, weights=NA, thres=thres, NR_thres=NR_thres, verbose=verbose, plot=plot)}
+        return(fit)}
+
+    } else { print(paste(type, ': invalid bootstrapping type (only parametric, p or nonparametric, np)'))}
+    
+  stopCluster(cl)}
+  
   # Format the parameter estimates into a matrix:
   estimates <- matrix(nrow=nBs, ncol=n*3+1)
   for(b in 1:nBs){
@@ -445,23 +552,54 @@ CIWeibull <- function(method='nonparametric', theta=NA, n=2, aad=NA, censor=NA, 
   output <- list(estimates, PDFquantiles, CDFquantiles, fits)
   names(output) <- c('Estimates', 'PDF', 'CDF', 'Fits')
   
+ print(paste("Total execution time: ", (proc.time() - ptm_total)[3]/60, " minutes"))
  return(output)}
 
 
-require(ggplot2)
-pdfplot <- as.data.frame(cbind(age=1:125, t(ci$PDF)))
-names(pdfplot)<-c('age','q025','q050','q100','q250','q500','q750','q900','q950','q975')
-ggplot(pdfplot, aes(x=age)) +
-  theme_bw() +
-  geom_line(aes(y=q500))+
-  geom_ribbon(aes(ymin=q025, ymax=q975), alpha=.5)
+####################################################################################
+# PLOT CONFIDENCE INTERVALS FROM BOOTSTRAP
+####################################################################################
 
-cdfplot <- as.data.frame(cbind(age=1:125, t(ci$CDF)))
-names(cdfplot)<-c('age','q025','q050','q100','q250','q500','q750','q900','q950','q975')
-ggplot(cdfplot, aes(x=age)) +
-  theme_bw() +
-  geom_line(aes(y=q500))+
-  geom_ribbon(aes(ymin=q025, ymax=q975), alpha=.5)
+PlotCIWeibull <- function(ci, aad=NA, censor=NA, type='surv') {
+  require(ggplot2)
+  # type is "surv" (the tail function) or "dens" (the density function)
+  lx <- NA
+  if(is.na(aad)==F && is.na(censor)==F){
+    require(survival)
+    sfit <- survfit(Surv(aad,censor,type="right")~1)
+    lx <- data.frame('age'=summary(sfit)$time, 'lx'=(summary(sfit)[6]))
+    plot(lx$age, lx$surv, cex=.05)}
+  
+  if(type=='dens'){
+  plotdata <- as.data.frame(cbind(age=1:125, t(ci$PDF)))
+  names(plotdata)<-c('age','q025','q050','q100','q250','q500','q750','q900','q950','q975')
+  
+  g <- ggplot(plotdata, aes(x=age)) +
+    theme_bw() +
+    geom_line(aes(y=q500))+
+    geom_ribbon(aes(ymin=q025, ymax=q975), alpha=.5)
+  
+  } else if (type=='surv'){
+    plotdata <- as.data.frame(cbind(age=1:125, t(ci$CDF)))
+  names(plotdata)<-c('age','q025','q050','q100','q250','q500','q750','q900','q950','q975')
+  
+  g <- ggplot(plotdata, aes(x=age)) +
+    theme_bw() +
+    geom_line(aes(y=q500))+
+    geom_ribbon(aes(ymin=q025, ymax=q975), alpha=.5)
+  
+  if(is.na(lx)==F){
+  g <- g +
+    geom_point(data=lx, aes(x=age, y=surv), size=.2, col='red')
+
+    }
+  
+  }
+  
+  
+  return(g)
+  }
+
 
 ####################################################################################
 # CHOOSE THE RIGHT NUMBER OF SUBPOPULATIONS BASED ON AIC
