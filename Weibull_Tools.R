@@ -16,7 +16,7 @@
 ##############################################################################################################
 # Simulate an N-population mixed-weibull dataset:
 
-SimWeibull <- function(nSamp=1000, rightcensor=.2, leftcensor=0, theta){
+SimWeibull <- function(nSamp=1000, rightcensor=.2, leftcensor = 0, theta){
   
 # Fix the missing degree of freedom on theta through the last weight in case of error:
 weights <- theta[seq(1,length(theta),3)]
@@ -48,17 +48,12 @@ return(list(aad=aad, censor=censor, belonging=belonging))}
 ####################################################################################
 ####################################################################################
 
-sim <- SimWeibull(nSamp=5000, rightcensor = .5, leftcensor=0, theta = c(.6, 90, 4, .4, 37, 9))
-aad <- as.numeric(sim[['aad']])
-censor <- as.numeric(sim[['censor']])
-
 load('~/Desktop/aad.RData')
 load('~/Desktop/censor.RData')
 simdata <- SimWeibull(nSamp=5000, leftcensor=0, rightcensor=0.4, theta = c(.5, 90, 4, .5, 27, 9))
 aad <- as.numeric(simdata[['aad']])
 censor <- as.numeric(simdata[['censor']])
 belonging <- simdata[['belonging']]
-initial_belonging<-belonging
                       
 ####################################################################################
 # MAIN EXPECTATION-MAXIMISATION FITTING FUNCTION
@@ -447,7 +442,7 @@ CIWeibull <- function(method='nonparametric', theta=NA, n=2, aad=NA, censor=NA, 
       index <- sort(sample(1:length(aad), length(aad), replace=T))
       this_aad <- aad[index]
       this_censor <- censor[index]
-      fit <- FitWeibull(this_aad, this_censor, n=n, weights=NA, thres=thres, NR_thres=NR_thres, verbose=verbose, plot=plot)}
+      try(fit <- FitWeibull(this_aad, this_censor, n=n, weights=NA, thres=thres, NR_thres=NR_thres, verbose=verbose, plot=plot), silent=T)}
       fits[[i]] <- fit}
     
   } else if(method=='parametric' | method=='p'){
@@ -456,7 +451,7 @@ CIWeibull <- function(method='nonparametric', theta=NA, n=2, aad=NA, censor=NA, 
       fit <- NA
       while(is.na(fit)==T){
       simdata <- SimWeibull(nSamp=length(aad), rightcensor=((length(censor)-sum(censor))/length(censor)), theta = theta)
-      fit <- FitWeibull(aad=as.numeric(simdata$aad), censor=as.numeric(simdata$censor), n=n, weights=NA, thres=thres, NR_thres=NR_thres, verbose=verbose, plot=plot)}
+      try(fit <- FitWeibull(aad=as.numeric(simdata$aad), censor=as.numeric(simdata$censor), n=n, weights=NA, thres=thres, NR_thres=NR_thres, verbose=verbose, plot=plot), silent=T)}
       fits[[i]] <- fit}
     
   } else { print(paste(type, ': invalid bootstrapping type (only parametric, p or nonparametric, np)'))}
@@ -480,17 +475,17 @@ CIWeibull <- function(method='nonparametric', theta=NA, n=2, aad=NA, censor=NA, 
           index <- sort(sample(1:length(aad), length(aad), replace=T))
           this_aad <- aad[index]
           this_censor <- censor[index]
-          fit <- FitWeibull(this_aad, this_censor, n=n, weights=NA, thres=thres, NR_thres=NR_thres, verbose=verbose, plot=plot)}
+          try(fit <- FitWeibull(this_aad, this_censor, n=n, weights=NA, thres=thres, NR_thres=NR_thres, verbose=verbose, plot=plot), silent=T)}
           return(fit)}
       
     } else if(method=='parametric' | method=='p'){
     fits = foreach(b = 1:nBs, 
-                     .export=c('FitWeibull')
+                     .export=c('FitWeibull', 'SimWeibull')
     ) %dopar% {
         fit <- NA
         while(is.na(fit)==T){
           simdata <- SimWeibull(nSamp=length(aad), rightcensor=((length(censor)-sum(censor))/length(censor)), theta = theta)
-          fit <- FitWeibull(aad=as.numeric(simdata$aad), censor=as.numeric(simdata$censor), n=n, weights=NA, thres=thres, NR_thres=NR_thres, verbose=verbose, plot=plot)}
+          try(fit <- FitWeibull(aad=as.numeric(simdata$aad), censor=as.numeric(simdata$censor), n=n, weights=NA, thres=thres, NR_thres=NR_thres, verbose=verbose, plot=plot), silent=T)}
         return(fit)}
 
     } else { print(paste(type, ': invalid bootstrapping type (only parametric, p or nonparametric, np)'))}
@@ -590,9 +585,7 @@ PlotCIWeibull <- function(ci, aad=NA, censor=NA, type='surv') {
   
   if(is.na(lx)==F){
   g <- g +
-    geom_point(data=lx, aes(x=age, y=surv), size=.2, col='red')
-
-    }
+    geom_point(data=lx, aes(x=age, y=surv), size=.2, col='red')}
   
   }
   
