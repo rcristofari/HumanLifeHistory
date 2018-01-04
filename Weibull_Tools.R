@@ -50,7 +50,7 @@ return(list(aad=aad, censor=censor, belonging=belonging))}
 
 load('~/Desktop/aad.RData')
 load('~/Desktop/censor.RData')
-simdata <- SimWeibull(nSamp=5000, leftcensor=0, rightcensor=0.4, theta = c(.5, 90, 4, .5, 37, 9))
+simdata <- SimWeibull(nSamp=5000, leftcensor=0, rightcensor=0.4, theta = c(.5, 120, 4, .5, 37, 9))
 aad <- as.numeric(simdata[['aad']])
 censor <- as.numeric(simdata[['censor']])
 belonging <- simdata[['belonging']]
@@ -593,6 +593,7 @@ return(result)
 
 PlotCIWeibull <- function(ci, components=NA, aad=NA, censor=NA, type='surv') {
   require(ggplot2)
+  require(scales)
   # type is "surv" (the tail function) or "dens" (the density function)
   lx <- NA
   if(is.na(aad)==F && is.na(censor)==F){
@@ -612,11 +613,12 @@ PlotCIWeibull <- function(ci, components=NA, aad=NA, censor=NA, type='surv') {
   
   if(is.na(components)==F){
     nPop <- length(components[['PDF']])
+    colors <- hue_pal()(nPop)
     for(p in 1:nPop){
       plotdata <- data.frame(age=1:125, median=components[['PDF']][[p]][5,], q025=components[['PDF']][[p]][1,], q975=components[['PDF']][[p]][9,])
       g <- g +
-        geom_line(data=plotdata, aes(y=median)) +
-        geom_ribbon(aes(ymin=q025, ymax=q975), alpha=.25)
+        geom_line(data=plotdata, aes(y=median), col=colors[p]) +
+        geom_ribbon(aes(ymin=q025, ymax=q975), alpha=.25, fill=colors[p])
     }}
   
   } else if (type=='surv'){
@@ -632,15 +634,14 @@ PlotCIWeibull <- function(ci, components=NA, aad=NA, censor=NA, type='surv') {
   g <- g +
     geom_point(data=lx, aes(x=age, y=surv), size=.2, col='red')}
   
-  
-  
   if(is.na(components)==F){
    nPop <- length(components[['CDF']])
+   colors <- hue_pal()(nPop)
    for(p in 1:nPop){
     plotdata <- data.frame(age=1:125, median=components[['CDF']][[p]][5,], q025=components[['CDF']][[p]][1,], q975=components[['CDF']][[p]][9,])
     g <- g +
-      geom_line(data=plotdata, aes(y=median)) +
-      geom_ribbon(aes(ymin=q025, ymax=q975), alpha=.25)
+      geom_line(data=plotdata, aes(y=median), col=colors[p]) +
+      geom_ribbon(aes(ymin=q025, ymax=q975), alpha=.25, fill=colors[p])
    }}
   }
   
