@@ -386,8 +386,8 @@ for(x in 1:(length(estvector)/3)){columnnames <- c(columnnames, wnames[x], scnam
 columnnames <- c(columnnames, 'LnL')
 colnames(iterations) <- columnnames
 rownames(iterations) <- sprintf("Iter_%s", 1:nrow(iterations))
-output <- list(BestLogLikelihood, estmatrix, iterations)
-names(output) <- c('LogLikelihood', 'Estimates', 'Iterations')
+output <- list(BestLogLikelihood, estmatrix, iterations, estvector)
+names(output) <- c('LogLikelihood', 'Estimates', 'Iterations', 'Theta')
 
 print(paste('Convergence reached in', round((proc.time()[3] - start_time[3])/60), 'minutes, after', k, 'iterations.'))
 
@@ -595,6 +595,8 @@ PlotCIWeibull <- function(ci, components=NA, aad=NA, censor=NA, type='surv') {
   require(ggplot2)
   require(scales)
   # type is "surv" (the tail function) or "dens" (the density function)
+  
+  ############################################################
   lx <- NA
   if(is.na(aad)==F && is.na(censor)==F){
     require(survival)
@@ -602,14 +604,15 @@ PlotCIWeibull <- function(ci, components=NA, aad=NA, censor=NA, type='surv') {
     lx <- data.frame('age'=summary(sfit)$time, 'lx'=(summary(sfit)[6]))
     plot(lx$age, lx$surv, cex=.05)}
   
+  ############################################################
   if(type=='dens'){
   plotdata <- as.data.frame(cbind(age=1:125, t(ci$PDF)))
   names(plotdata)<-c('age','q025','q050','q100','q250','q500','q750','q900','q950','q975')
   
   g <- ggplot(plotdata, aes(x=age)) +
     theme_bw() +
-    geom_line(aes(y=q500), col='darkred')+
-    geom_ribbon(aes(ymin=q025, ymax=q975), alpha=.25, fill='red')
+    geom_line(aes(y=q500))+
+    geom_ribbon(aes(ymin=q025, ymax=q975), alpha=.25)
   
   if(is.na(components)==F){
     nPop <- length(components[['PDF']])
@@ -620,15 +623,16 @@ PlotCIWeibull <- function(ci, components=NA, aad=NA, censor=NA, type='surv') {
         geom_line(data=plotdata, aes(y=median), col=colors[p]) +
         geom_ribbon(aes(ymin=q025, ymax=q975), alpha=.25, fill=colors[p])
     }}
-  
+
+  ############################################################  
   } else if (type=='surv'){
     plotdata <- as.data.frame(cbind(age=1:125, t(ci$CDF)))
   names(plotdata)<-c('age','q025','q050','q100','q250','q500','q750','q900','q950','q975')
   
   g <- ggplot(plotdata, aes(x=age)) +
     theme_bw() +
-    geom_line(aes(y=q500), col='darkred')+
-    geom_ribbon(aes(ymin=q025, ymax=q975), alpha=.25, fill='red')
+    geom_line(aes(y=q500))+
+    geom_ribbon(aes(ymin=q025, ymax=q975), alpha=.25)
   
   if(is.na(lx)==F){
   g <- g +
@@ -645,8 +649,7 @@ PlotCIWeibull <- function(ci, components=NA, aad=NA, censor=NA, type='surv') {
    }}
   }
   
-  return(g)
-  }
+  return(g)}
 
 
 ####################################################################################
