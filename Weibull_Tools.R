@@ -50,7 +50,7 @@ return(list(aad=aad, censor=censor, belonging=belonging))}
 
 load('~/Desktop/aad.RData')
 load('~/Desktop/censor.RData')
-simdata <- SimWeibull(nSamp=5000, leftcensor=0, rightcensor=0.4, theta = c(.5, 90, 4, .5, 27, 9))
+simdata <- SimWeibull(nSamp=5000, leftcensor=0, rightcensor=0.4, theta = c(.5, 90, 4, .5, 37, 9))
 aad <- as.numeric(simdata[['aad']])
 censor <- as.numeric(simdata[['censor']])
 belonging <- simdata[['belonging']]
@@ -151,7 +151,7 @@ G <- function(b, i, aad, censor, probs) {
   G1 <- function(b, i, aad, probs){
     total <- 0
     for(j in 1:length(aad)){
-      logpoint <- log(probs[j,i]) + log(log(aad[j])) + b*log(aad[j])
+      logpoint <- log(ifelse(probs[j,i]<1e-100, 1e-100, probs[j,i])) + log(log(aad[j])) + b*log(aad[j])
       if(logpoint > 709){
       total <- mpfr(total, precBits = 24)
       logpoint <- mpfr(logpoint, precBits = 24)}
@@ -165,7 +165,7 @@ G <- function(b, i, aad, censor, probs) {
   G3 <- function(b, i, aad, probs){
     total <- 0
     for(j in 1:length(aad)){
-      logpoint <- log(probs[j,i]) + b*log(aad[j])
+      logpoint <- log(ifelse(probs[j,i]<1e-100, 1e-100, probs[j,i])) + b*log(aad[j])
       if(logpoint > 709){
         total <- mpfr(total, precBits = 24)
         logpoint <- mpfr(logpoint, precBits = 24)}
@@ -192,7 +192,7 @@ g <- function(b, i, aad, censor, probs) {
   U <- v <-  function(b, i, aad, probs){
     total <- 0
     for(j in 1:length(aad)){
-      logpoint <- log(probs[j,i]) + log(log(aad[j])) + b*log(aad[j])
+      logpoint <- log(ifelse(probs[j,i]<1e-100, 1e-100, probs[j,i])) + log(log(aad[j])) + b*log(aad[j])
       if(logpoint > 709){
         total <- mpfr(total, precBits = 24)
         logpoint <- mpfr(logpoint, precBits = 24)}
@@ -202,7 +202,7 @@ g <- function(b, i, aad, censor, probs) {
   u <-  function(b, i, aad, probs){
     total <- 0
     for(j in 1:length(aad)){
-      logpoint <- log(probs[j,i]) + 2*log(log(aad[j])) + b*log(aad[j])
+      logpoint <- log(ifelse(probs[j,i]<1e-100, 1e-100, probs[j,i])) + 2*log(log(aad[j])) + b*log(aad[j])
       if(logpoint > 709){
         total <- mpfr(total, precBits = 24)
         logpoint <- mpfr(logpoint, precBits = 24)}
@@ -212,7 +212,7 @@ g <- function(b, i, aad, censor, probs) {
   V <-  function(b, i, aad, probs){
     total <- 0
     for(j in 1:length(aad)){
-      logpoint <- log(probs[j,i]) + b*log(aad[j])
+      logpoint <- log(ifelse(probs[j,i]<1e-100, 1e-100, probs[j,i])) + b*log(aad[j])
       if(logpoint > 709){
         total <- mpfr(total, precBits = 24)
         logpoint <- mpfr(logpoint, precBits = 24)}
@@ -552,10 +552,46 @@ CIWeibull <- function(method='nonparametric', theta=NA, n=2, aad=NA, censor=NA, 
 
 
 ####################################################################################
+# EXTRACT INDIVIUAL COMPONENTS FROM THE BOOTSTRAP ESTIMATES
+####################################################################################
+
+WeibullComponents <- function(ci) {
+  thetas <- ci$Estimates[,-ncol(ci$Estimates)]
+  nPop <- ncol(thetas)/3
+  nBs <- nrow(thetas)
+  ages <- 1:125
+  
+  PDFlist <- list()
+  CDFlist <- list()
+
+  for(i in 1:nPop){
+    
+    PDFs <- matrix(nrow=length(ages), ncol=nBs)
+    CDFs <- matrix(nrow=length(ages), ncol=nBs)
+    
+    for(B in 1:nBs){
+      w <- thetas[b,(i-1)*3+1]
+      a <- thetas[b,(i-1)*3+2]
+      b <- thetas[b,(i-1)*3+3]
+      PDFs[,B] <- dweibull(ages, b, a)  
+      CDFs[,B] <- 1 - pweibull(ages, b, a) 
+      # apply median, quant. 2.5%, 5%, 10%, 25%, 75%, 90%, 95%, 97.5%
+      }
+    PDFquantiles <- apply(PDFs, 1, quantile, c(.025, .05, .1, .25, .5, .75, .90, .95, .975))
+    CDFquantiles <- apply(CDFs, 1, quantile, c(.025, .05, .1, .25, .5, .75, .90, .95, .975))
+    PDFlist[[i]] <- PDFquantiles
+    CDFlist[[i]] <- CDFquantiles
+  }
+  result <- list(PDFlist, CDFlist)
+  names(result) <- c('PDF','CDF')
+return(result)
+}
+
+####################################################################################
 # PLOT CONFIDENCE INTERVALS FROM BOOTSTRAP
 ####################################################################################
 
-PlotCIWeibull <- function(ci, aad=NA, censor=NA, type='surv') {
+PlotCIWeibull <- function(ci, components=NA, aad=NA, censor=NA, type='surv') {
   require(ggplot2)
   # type is "surv" (the tail function) or "dens" (the density function)
   lx <- NA
@@ -571,8 +607,17 @@ PlotCIWeibull <- function(ci, aad=NA, censor=NA, type='surv') {
   
   g <- ggplot(plotdata, aes(x=age)) +
     theme_bw() +
-    geom_line(aes(y=q500))+
-    geom_ribbon(aes(ymin=q025, ymax=q975), alpha=.5)
+    geom_line(aes(y=q500), col='darkred')+
+    geom_ribbon(aes(ymin=q025, ymax=q975), alpha=.25, fill='red')
+  
+  if(is.na(components)==F){
+    nPop <- length(components[['PDF']])
+    for(p in 1:nPop){
+      plotdata <- data.frame(age=1:125, median=components[['PDF']][[p]][5,], q025=components[['PDF']][[p]][1,], q975=components[['PDF']][[p]][9,])
+      g <- g +
+        geom_line(data=plotdata, aes(y=median)) +
+        geom_ribbon(aes(ymin=q025, ymax=q975), alpha=.25)
+    }}
   
   } else if (type=='surv'){
     plotdata <- as.data.frame(cbind(age=1:125, t(ci$CDF)))
@@ -580,15 +625,24 @@ PlotCIWeibull <- function(ci, aad=NA, censor=NA, type='surv') {
   
   g <- ggplot(plotdata, aes(x=age)) +
     theme_bw() +
-    geom_line(aes(y=q500))+
-    geom_ribbon(aes(ymin=q025, ymax=q975), alpha=.5)
+    geom_line(aes(y=q500), col='darkred')+
+    geom_ribbon(aes(ymin=q025, ymax=q975), alpha=.25, fill='red')
   
   if(is.na(lx)==F){
   g <- g +
     geom_point(data=lx, aes(x=age, y=surv), size=.2, col='red')}
   
-  }
   
+  
+  if(is.na(components)==F){
+   nPop <- length(components[['CDF']])
+   for(p in 1:nPop){
+    plotdata <- data.frame(age=1:125, median=components[['CDF']][[p]][5,], q025=components[['CDF']][[p]][1,], q975=components[['CDF']][[p]][9,])
+    g <- g +
+      geom_line(data=plotdata, aes(y=median)) +
+      geom_ribbon(aes(ymin=q025, ymax=q975), alpha=.25)
+   }}
+  }
   
   return(g)
   }
