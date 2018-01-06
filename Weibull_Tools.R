@@ -386,8 +386,8 @@ for(x in 1:(length(estvector)/3)){columnnames <- c(columnnames, wnames[x], scnam
 columnnames <- c(columnnames, 'LnL')
 colnames(iterations) <- columnnames
 rownames(iterations) <- sprintf("Iter_%s", 1:nrow(iterations))
-output <- list(BestLogLikelihood, estmatrix, iterations, estvector)
-names(output) <- c('LogLikelihood', 'Estimates', 'Iterations', 'Theta')
+output <- list(BestLogLikelihood, estmatrix, iterations, estvector, current_belonging)
+names(output) <- c('LogLikelihood', 'Estimates', 'Iterations', 'Theta', 'Weights')
 
 print(paste('Convergence reached in', round((proc.time()[3] - start_time[3])/60), 'minutes, after', k, 'iterations.'))
 
@@ -570,9 +570,9 @@ WeibullComponents <- function(ci) {
     CDFs <- matrix(nrow=length(ages), ncol=nBs)
     
     for(B in 1:nBs){
-      w <- thetas[b,(i-1)*3+1]
-      a <- thetas[b,(i-1)*3+2]
-      b <- thetas[b,(i-1)*3+3]
+      w <- thetas[B,(i-1)*3+1]
+      a <- thetas[B,(i-1)*3+2]
+      b <- thetas[B,(i-1)*3+3]
       PDFs[,B] <- dweibull(ages, b, a)  
       CDFs[,B] <- 1 - pweibull(ages, b, a) 
       # apply median, quant. 2.5%, 5%, 10%, 25%, 75%, 90%, 95%, 97.5%
@@ -601,8 +601,7 @@ PlotCIWeibull <- function(ci, components=NA, aad=NA, censor=NA, type='surv') {
   if(is.na(aad)==F && is.na(censor)==F){
     require(survival)
     sfit <- survfit(Surv(aad,censor,type="right")~1)
-    lx <- data.frame('age'=summary(sfit)$time, 'lx'=(summary(sfit)[6]))
-    plot(lx$age, lx$surv, cex=.05)}
+    lx <- data.frame('age'=summary(sfit)$time, 'lx'=(summary(sfit)[6]))}
   
   ############################################################
   if(type=='dens'){
@@ -621,7 +620,7 @@ PlotCIWeibull <- function(ci, components=NA, aad=NA, censor=NA, type='surv') {
       plotdata <- data.frame(age=1:125, median=components[['PDF']][[p]][5,], q025=components[['PDF']][[p]][1,], q975=components[['PDF']][[p]][9,])
       g <- g +
         geom_line(data=plotdata, aes(y=median), col=colors[p]) +
-        geom_ribbon(aes(ymin=q025, ymax=q975), alpha=.25, fill=colors[p])
+        geom_ribbon(data=plotdata, aes(ymin=q025, ymax=q975), alpha=.25, fill=colors[p])
     }}
 
   ############################################################  
@@ -636,7 +635,7 @@ PlotCIWeibull <- function(ci, components=NA, aad=NA, censor=NA, type='surv') {
   
   if(is.na(lx)==F){
   g <- g +
-    geom_point(data=lx, aes(x=age, y=surv), size=.2, col='red')}
+    geom_point(data=lx, aes(x=age, y=surv), size=.1, shape=2)}
   
   if(is.na(components)==F){
    nPop <- length(components[['CDF']])
@@ -645,7 +644,7 @@ PlotCIWeibull <- function(ci, components=NA, aad=NA, censor=NA, type='surv') {
     plotdata <- data.frame(age=1:125, median=components[['CDF']][[p]][5,], q025=components[['CDF']][[p]][1,], q975=components[['CDF']][[p]][9,])
     g <- g +
       geom_line(data=plotdata, aes(y=median), col=colors[p]) +
-      geom_ribbon(aes(ymin=q025, ymax=q975), alpha=.25, fill=colors[p])
+      geom_ribbon(data=plotdata, aes(ymin=q025, ymax=q975), alpha=.25, fill=colors[p])
    }}
   }
   
